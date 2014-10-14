@@ -22,7 +22,7 @@ if (!String.IsNullOrEmpty(LayoutPageFile)) {
 #>
 }
 <style type='text/css'>
-    /*設定 數字靠右*/
+    
 <#
         for (int x=0; x<MetaTable.Columns.Count; x++) {
             MetaColumnInfo column=MetaTable.Columns[x];

@@ -43,6 +43,7 @@ using System.Threading.Tasks;
 <# } #>
 using System.Net;
 using System.Web;
+using System.Web.Routing;
 using System.Web.Mvc;
 <# foreach (var namespaceName in RequiredNamespaces) { #>
 using <#= namespaceName #>;
@@ -72,11 +73,35 @@ namespace <#= Namespace #>
         bindAttribute = String.Empty;
     }
 #>
-    public class <#= ControllerName #> : Controller
-    {
-        private <#= ContextTypeName #> db = new <#= ContextTypeName #>();
 
-        // GET: <#= routePrefix #>/<#= ViewPrefix #>Index
+    //[Authorize(Roles = "Basic")]
+    public partial class <#= ControllerName #> : BaseMvcController
+    {
+        private <#= ControllerRootName #>Repository repo<#= ControllerRootName #>s;
+<# foreach (var property in relatedProperties.Values) { #>
+        private <#= property.EntitySetName.TrimEnd('s') #>Repository repo<#= property.EntitySetName #>;
+<# } #>
+
+        public <#= ControllerRootName #>Controller() : this(new <#= ContextTypeName #>())
+        { }
+
+        public <#= ControllerRootName #>Controller(ApplicationUserManager userManager, ApplicationRoleManager roleManager) : this(new <#= ContextTypeName #>(), userManager, roleManager)
+        { }
+
+        public <#= ControllerRootName #>Controller(<#= ContextTypeName #> db, ApplicationUserManager userManager = null, ApplicationRoleManager roleManager = null) : base(db, userManager, roleManager)
+        { }
+
+        protected override void Initialize(RequestContext requestContext)
+        {
+            base.Initialize(requestContext);
+
+            this.repo<#= ControllerRootName #>s = new <#= ControllerRootName #>Repository(db, User);
+<# foreach (var property in relatedProperties.Values) { #>
+            this.repo<#= property.EntitySetName #> = new <#= property.EntitySetName.TrimEnd('s') #>Repository(db, User);
+<# } #>
+        }
+
+        [Route("~/<#= routePrefix #>s"), HttpGet]
 <# if (UseAsync) { #>
         public async Task<ActionResult> <#= ViewPrefix #>Index()
 <# } else { #>
@@ -87,63 +112,40 @@ namespace <#= Namespace #>
         includeExpressions = String.Join("", relatedProperties.Values.Select(property => String.Format(".Include({0} => {0}.{1})", lambdaVar, property.AssociationPropertyName)));
 #>
 <# if(!String.IsNullOrEmpty(includeExpressions)) { #>
-            var <#= entitySetVar #> = db.<#= entitySetName #><#= includeExpressions #>;
+            //var <#= entitySetVar #> = db.<#= entitySetName #><#= includeExpressions #>;
 <#		if (UseAsync) { #>
-            return View(await <#= entitySetVar #>.ToListAsync());
+            //return View(await <#= entitySetVar #>.ToListAsync());
 <#		} else { #>
-            return View(<#= entitySetVar #>.ToList());
+            return View(repo<#= ControllerRootName #>s.GetAll()<#= includeExpressions #>);
 <#		} #>
 <# } else { #>
 <#		if (UseAsync) { #>
             return View(await db.<#= entitySetName #><#= includeExpressions #>.ToListAsync());
 <#		} else { #>
-            return View(db.<#= entitySetName #><#= includeExpressions #>.ToList());
+            var result = repo<#= ControllerRootName #>s.GetAll()<#= includeExpressions #>;
+            return View(result);
+            //return View(db.<#= entitySetName #><#= includeExpressions #>.ToList());
 <#		} #>
 <# } #>
         }
 
-        /*
-        // GET: <#= routePrefix #>/<#= ViewPrefix #>Details/5
-<# if (UseAsync) { #>
-        public async Task<ActionResult> <#= ViewPrefix #>Details(<#= primaryKeyNullableTypeName #> id)
-<# } else { #>
-        public ActionResult <#= ViewPrefix #>Details(<#= primaryKeyNullableTypeName #> id)
-<# } #>
-        {
-            if (id == null)
-            {
-                return new HttpStatusCodeResult(HttpStatusCode.BadRequest);
-            }
-<# if (UseAsync) { #>
-            <#= ModelTypeName #> <#= ModelVariable #> = await db.<#= entitySetName #>.FindAsync(id);
-<# } else { #>
-            <#= ModelTypeName #> <#= ModelVariable #> = db.<#= entitySetName #>.Find(id);
-<# } #>
-            if (<#= ModelVariable #> == null)
-            {
-                return HttpNotFound();
-            }
-            return View(<#= ModelVariable #>);
-        }
-        */
 
-        // GET: <#= routePrefix #>/<#= ViewPrefix #>Create
+        [Route("~/<#= routePrefix #>/create"), HttpGet]
         public ActionResult <#= ViewPrefix #>Create()
         {
 <# foreach (var property in relatedProperties.Values) { #>
-            ViewBag.<#= property.ForeignKeyPropertyNames[0] #> = new SelectList(db.<#= property.EntitySetName #>, "<#= property.PrimaryKeyNames[0] #>", "<#= property.DisplayPropertyName #>");
+            ViewBag.<#= property.ForeignKeyPropertyNames[0] #> = new SelectList(repo<#= property.EntitySetName #>.GetAll(), "<#= property.PrimaryKeyNames[0] #>", "<#= property.DisplayPropertyName #>");
 <# } #>
-            return View();
+            return View(new <#= ControllerRootName #>());
         }
 
-        // POST: <#= routePrefix #>/<#= ViewPrefix #>Create
+
+        [Route("~/<#= routePrefix #>/create"), HttpPost, ValidateAntiForgeryToken]
 <# if (IsOverpostingProtectionRequired) {
     foreach (var line in OverpostingWarningMessage.Split(new string[] { Environment.NewLine }, StringSplitOptions.None)) { 
 #>
         // <#= line #>
 <# } } #>
-        [HttpPost]
-        [ValidateAntiForgeryToken]
 <# if (UseAsync) { #>
         public async Task<ActionResult> <#= ViewPrefix #>Create(<#= bindAttribute #><#= ModelTypeName #> <#= ModelVariable #>)
 <# } else { #>
@@ -155,24 +157,25 @@ namespace <#= Namespace #>
 <# if(!String.IsNullOrEmpty(primaryKeyType) && String.Equals("System.Guid", primaryKeyType, StringComparison.OrdinalIgnoreCase)) { #>
                 <#= ModelVariable #>.<#= primaryKeyName #> = Guid.NewGuid();
 <# } #>
-                db.<#= entitySetName #>.Add(<#= ModelVariable #>);
+                <#= ModelVariable #> = repo<#= ControllerRootName #>s.Insert(<#= ModelVariable #>);
+                //db.<#= entitySetName #>.Add(<#= ModelVariable #>);
 <# if (UseAsync) {#>
-                await db.SaveChangesAsync();
+                //await db.SaveChangesAsync();
 <# } else { #>
-                db.SaveChanges();
+                //db.SaveChanges();
 <# } #>
-                DisplaySuccessMessage("Has append a <#= ModelTypeName #> record");
+                DisplaySuccessMessage("<#= ModelTypeName #> successfully created.");
                 return RedirectToAction("<#= ViewPrefix #>Index");
             }
 
 <# foreach (var property in relatedProperties.Values) { #>
-            ViewBag.<#= property.ForeignKeyPropertyNames[0] #> = new SelectList(db.<#= property.EntitySetName #>, "<#= property.PrimaryKeyNames[0] #>", "<#= property.DisplayPropertyName #>", <#= ModelVariable #>.<#= property.ForeignKeyPropertyNames[0] #>);
+            ViewBag.<#= property.ForeignKeyPropertyNames[0] #> = new SelectList(repo<#= property.EntitySetName #>.GetAll(), "<#= property.PrimaryKeyNames[0] #>", "<#= property.DisplayPropertyName #>", <#= ModelVariable #>.<#= property.ForeignKeyPropertyNames[0] #>);
 <# } #>
             DisplayErrorMessage();
             return View(<#= ModelVariable #>);
         }
 
-        // GET: <#= routePrefix #>/<#= ViewPrefix #>Edit/5
+        [Route("~/<#= routePrefix #>/edit/{id}"), HttpGet]
 <# if (UseAsync) { #>
         public async Task<ActionResult> <#= ViewPrefix #>Edit(<#= primaryKeyNullableTypeName #> id)
 <# } else { #>
@@ -184,28 +187,27 @@ namespace <#= Namespace #>
                 return new HttpStatusCodeResult(HttpStatusCode.BadRequest);
             }
 <# if (UseAsync) { #>
-            <#= ModelTypeName #> <#= ModelVariable #> = await db.<#= entitySetName #>.FindAsync(id);
+            //<#= ModelTypeName #> <#= ModelVariable #> = await db.<#= entitySetName #>.FindAsync(id);
 <# } else { #>
-            <#= ModelTypeName #> <#= ModelVariable #> = db.<#= entitySetName #>.Find(id);
+            var <#= ModelVariable #> = repo<#= ControllerRootName #>s.FirstOrDefault(id.Value);
+            //<#= ModelTypeName #> <#= ModelVariable #> = db.<#= entitySetName #>.Find(id);
 <# } #>
             if (<#= ModelVariable #> == null)
             {
                 return HttpNotFound();
             }
 <# foreach (var property in relatedProperties.Values) { #>
-            ViewBag.<#= property.ForeignKeyPropertyNames[0] #> = new SelectList(db.<#= property.EntitySetName #>, "<#= property.PrimaryKeyNames[0] #>", "<#= property.DisplayPropertyName #>", <#= ModelVariable #>.<#= property.ForeignKeyPropertyNames[0] #>);
+            ViewBag.<#= property.ForeignKeyPropertyNames[0] #> = new SelectList(repo<#= property.EntitySetName #>.GetAll(), "<#= property.PrimaryKeyNames[0] #>", "<#= property.DisplayPropertyName #>", <#= ModelVariable #>.<#= property.ForeignKeyPropertyNames[0] #>);
 <# } #>
             return View(<#= ModelVariable #>);
         }
 
-        // POST: <#= routePrefix #><#= ViewPrefix #>/Edit/5
+        [Route("~/<#= routePrefix #>/edit/{id}"), HttpPost, ValidateAntiForgeryToken]
 <# if (IsOverpostingProtectionRequired) {
     foreach (var line in OverpostingWarningMessage.Split(new string[] { Environment.NewLine }, StringSplitOptions.None)) { 
 #>
         // <#= line #>
 <# } } #>
-        [HttpPost]
-        [ValidateAntiForgeryToken]
 <# if (UseAsync) { #>
         public async Task<ActionResult> <#= ViewPrefix #>Edit(<#= bindAttribute #><#= ModelTypeName #> <#= ModelVariable #>)
 <# } else { #>
@@ -214,23 +216,24 @@ namespace <#= Namespace #>
         {
             if (ModelState.IsValid)
             {
-                db.Entry(<#= ModelVariable #>).State = EntityState.Modified;
+                <#= ModelVariable #> = repo<#= ControllerRootName #>s.Update(<#= ModelVariable #>);
+                //db.Entry(<#= ModelVariable #>).State = EntityState.Modified;
 <# if (UseAsync) { #>
-                await db.SaveChangesAsync();
+                //await db.SaveChangesAsync();
 <# } else { #>
-                db.SaveChanges();
+                //db.SaveChanges();
 <# } #>
-                DisplaySuccessMessage("Has update a <#= ModelTypeName #> record");
+                DisplaySuccessMessage("<#= ModelTypeName #> successfully updated.");
                 return RedirectToAction("<#= ViewPrefix #>Index");
             }
 <# foreach (var property in relatedProperties.Values) { #>
-            ViewBag.<#= property.ForeignKeyPropertyNames[0] #> = new SelectList(db.<#= property.EntitySetName #>, "<#= property.PrimaryKeyNames[0] #>", "<#= property.DisplayPropertyName #>", <#= ModelVariable #>.<#= property.ForeignKeyPropertyNames[0] #>);
+            ViewBag.<#= property.ForeignKeyPropertyNames[0] #> = new SelectList(repo<#= property.EntitySetName #>.GetAll(), "<#= property.PrimaryKeyNames[0] #>", "<#= property.DisplayPropertyName #>", <#= ModelVariable #>.<#= property.ForeignKeyPropertyNames[0] #>);
 <# } #>
             DisplayErrorMessage();
             return View(<#= ModelVariable #>);
         }
 
-        // GET: <#= routePrefix #>/<#= ViewPrefix #>Delete/5
+        [Route("~/<#= routePrefix #>/delete/{id}"), HttpGet]
 <# if (UseAsync) { #>
         public async Task<ActionResult> <#= ViewPrefix #>Delete(<#= primaryKeyNullableTypeName #> id)
 <# } else { #>
@@ -242,9 +245,10 @@ namespace <#= Namespace #>
                 return new HttpStatusCodeResult(HttpStatusCode.BadRequest);
             }
 <# if (UseAsync) { #>
-            <#= ModelTypeName #> <#= ModelVariable #> = await db.<#= entitySetName #>.FindAsync(id);
+            //<#= ModelTypeName #> <#= ModelVariable #> = await db.<#= entitySetName #>.FindAsync(id);
 <# } else { #>
-            <#= ModelTypeName #> <#= ModelVariable #> = db.<#= entitySetName #>.Find(id);
+            var <#= ModelVariable #> = repo<#= ControllerRootName #>s.FirstOrDefault(id.Value);
+            //<#= ModelTypeName #> <#= ModelVariable #> = db.<#= entitySetName #>.Find(id);
 <# } #>
             if (<#= ModelVariable #> == null)
             {
@@ -253,9 +257,7 @@ namespace <#= Namespace #>
             return View(<#= ModelVariable #>);
         }
 
-        // POST: <#= routePrefix #>/<#= ViewPrefix #>Delete/5
-        [HttpPost, ActionName("<#= ViewPrefix #>Delete")]
-        [ValidateAntiForgeryToken]
+        [Route("~/<#= routePrefix #>/delete/{id}"), HttpPost, ValidateAntiForgeryToken, ActionName("<#= ViewPrefix #>Delete")]
 <# if (UseAsync) { #>
         public async Task<ActionResult> <#= ViewPrefix #>DeleteConfirmed(<#= primaryKeyShortTypeName #> id)
 <# } else { #>
@@ -263,35 +265,48 @@ namespace <#= Namespace #>
 <# } #>
         {
 <# if (UseAsync) { #>
-            <#= ModelTypeName #> <#= ModelVariable #> = await db.<#= entitySetName #>.FindAsync(id);
+            //<#= ModelTypeName #> <#= ModelVariable #> = await db.<#= entitySetName #>.FindAsync(id);
 <# } else { #>
-            <#= ModelTypeName #> <#= ModelVariable #> = db.<#= entitySetName #>.Find(id);
+            var <#= ModelVariable #> = repo<#= ControllerRootName #>s.FirstOrDefault(id);
+            //<#= ModelTypeName #> <#= ModelVariable #> = db.<#= entitySetName #>.Find(id);
 <# } #>
-            db.<#= entitySetName #>.Remove(<#= ModelVariable #>);
+
+            if (<#= ModelVariable #> == null)
+            {
+                return HttpNotFound();
+            }
+            <#= ModelVariable #> = repo<#= ControllerRootName #>s.Delete(<#= ModelVariable #>);
+
+            //db.<#= entitySetName #>.Remove(<#= ModelVariable #>);
 <# if (UseAsync) { #>
-            await db.SaveChangesAsync();
+            //await db.SaveChangesAsync();
 <# } else { #>
-            db.SaveChanges();
+            //db.SaveChanges();
 <# } #>
-            DisplaySuccessMessage("Has delete a <#= ModelTypeName #> record");
+            DisplaySuccessMessage("<#= ModelTypeName #> successfully deleted.");
             return RedirectToAction("<#= ViewPrefix #>Index");
         }
 
-        private void DisplaySuccessMessage(string msgText)
+        private void DisplaySuccessMessage(string msgText = "<#= ControllerRootName #> successfully updated.")
         {
             TempData["SuccessMessage"] = msgText;
         }
 
-        private void DisplayErrorMessage()
+        private void DisplayErrorMessage(string msgText = "Unable to save changes.")
         {
-            TempData["ErrorMessage"] = "Save changes was unsuccessful.";
+            TempData["ErrorMessage"] = msgText;
         }
 
         protected override void Dispose(bool disposing)
         {
             if (disposing)
             {
-                db.Dispose();
+                if (repo<#= ControllerRootName #>s != null)
+                    repo<#= ControllerRootName #>s.Dispose(disposing);
+<# foreach (var property in relatedProperties.Values) { #>
+                if (repo<#= property.EntitySetName #> != null)
+                    repo<#= property.EntitySetName #>.Dispose(disposing);
+<# } #>
             }
             base.Dispose(disposing);
         }

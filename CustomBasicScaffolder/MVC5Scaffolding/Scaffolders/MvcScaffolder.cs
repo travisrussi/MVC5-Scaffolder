@@ -186,7 +186,7 @@ namespace Happy.Scaffolding.MVC.Scaffolders
                 return;
 
             // add Metadata for Model
-            outputFolderPath = Path.Combine(GetModelFolderPath(selectionRelativePath), modelType.Name + "Metadata");
+            outputFolderPath = Path.Combine(GetModelFolderPath(selectionRelativePath), @"ViewModel\" + modelType.Name + "ViewModel");
             AddModelMetadata(project: project
                 , controllerName: controllerName
                 , controllerRootName: controllerRootName
